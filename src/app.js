@@ -6,12 +6,18 @@
   const Storage = global.StorageManager;
   const Merit = global.MeritSystem;
   const Api = global.ApiModule;
+  const NumberUtils = global.NumberUtils;
 
   let user = null;
   let records = [];
   let selectedScriptureId = '';
   let userMerit = 0n;
   let modelMerit = 0n;
+
+  let isChanting = false;
+  let isPaused = false;
+  let apiClient = null;
+  let session = null;
 
   function init() {
     loadUser();
@@ -29,7 +35,7 @@
     } else {
       user = User.migrateUser(saved);
     }
-    userMerit = global.NumberUtils.toBigInt(user.totalMerit);
+    userMerit = NumberUtils.toBigInt(user.totalMerit);
   }
 
   function loadRecords() {
@@ -96,6 +102,10 @@
     UI.bindEvent('btn-export', 'click', exportArchive);
     UI.bindEvent('btn-import', 'click', () => UI.$('import-file')?.click());
     UI.bindEvent('import-file', 'change', importArchive);
+
+    UI.bindEvent('btn-start', 'click', startChanting);
+    UI.bindEvent('btn-pause', 'click', pauseChanting);
+    UI.bindEvent('btn-stop', 'click', stopChanting);
   }
 
   function exportArchive() {
@@ -122,7 +132,7 @@
         const imported = Storage.importData(data);
         user = User.migrateUser(imported.user);
         records = imported.records || [];
-        userMerit = global.NumberUtils.toBigInt(user.totalMerit);
+        userMerit = NumberUtils.toBigInt(user.totalMerit);
         saveState();
         setupUI();
         UI.showToast('存档已导入');
@@ -132,6 +142,198 @@
     };
     reader.readAsText(file);
     e.target.value = '';
+  }
+
+  function startChanting() {
+    if (isChanting) {
+      if (isPaused) {
+        isPaused = false;
+        UI.setChantingState(true, false);
+        UI.updateProgress('继续诵经...', '进行中');
+      }
+      return;
+    }
+
+    const scripture = (global.SCRIPTURES || []).find((s) => s.id === selectedScriptureId);
+    if (!scripture) {
+      UI.showToast('请先选择一部经文', 'error');
+      return;
+    }
+
+    const apiConfig = UI.getApiConfig();
+    if (!apiConfig.apiKey) {
+      UI.showToast('请输入 API 密钥', 'error');
+      return;
+    }
+
+    try {
+      apiClient = Api.createApiClient(apiConfig);
+    } catch (err) {
+      UI.showToast('API 配置错误：' + err.message, 'error');
+      return;
+    }
+
+    const settings = UI.getChantSettings();
+    isChanting = true;
+    isPaused = false;
+    modelMerit = 0n;
+    session = {
+      startTime: Date.now(),
+      scriptureId: scripture.id,
+      scriptureName: scripture.name,
+      apiType: apiConfig.apiType,
+      provider: apiConfig.provider,
+      model: apiConfig.model || apiClient.config().model,
+      history: [],
+      count: 0,
+      maxCount: settings.count,
+      interval: settings.interval,
+      userMeritBefore: userMerit,
+      status: 'stopped',
+    };
+
+    UI.setChantingState(true, false);
+    UI.updateProgress('开始诵经', '第 0 次');
+    chantingLoop(scripture);
+  }
+
+  function pauseChanting() {
+    if (!isChanting) return;
+    isPaused = !isPaused;
+    UI.setChantingState(true, isPaused);
+    UI.updateProgress(isPaused ? '已暂停' : '继续诵经...', isPaused ? '点击开始继续' : '进行中');
+  }
+
+  function stopChanting() {
+    if (!isChanting) return;
+    isChanting = false;
+    isPaused = false;
+    if (apiClient) {
+      apiClient.abort();
+      apiClient = null;
+    }
+    finishSession('stopped');
+    UI.setChantingState(false, false);
+    UI.updateProgress('已停止', '-');
+  }
+
+  async function chantingLoop(scripture) {
+    while (isChanting) {
+      while (isPaused && isChanting) {
+        await sleep(200);
+      }
+      if (!isChanting) break;
+
+      const currentCount = session.count;
+      try {
+        UI.updateProgress('正在诵经...', '第 ' + (currentCount + 1) + ' 次');
+        const result = await apiClient.chat(session.history, scripture.content);
+        const exchange = { reply: result.reply };
+        session.history.push(exchange);
+
+        const calc = Merit.calculateSingleMerit(scripture.baseMerit, currentCount);
+        const delta = calc.merit;
+
+        userMerit = Merit.addMerit(userMerit, delta);
+        modelMerit = Merit.addMerit(modelMerit, delta);
+        session.count += 1;
+        user.chantCount += 1;
+
+        updateByScripture(scripture.id, delta);
+        updateByModel(session.model, delta);
+
+        UI.updateMeritDisplay(userMerit, modelMerit, delta);
+        UI.updateDevotionTitle(calc.title);
+        UI.updateProgress('诵经完成一次', '第 ' + session.count + ' 次 · 系数 ' + calc.coefficient);
+
+        if (isContextLimitReached()) {
+          session.status = 'context_limit';
+          UI.showToast('达到上下文限制，已停止', 'error');
+          break;
+        }
+
+        if (session.maxCount > 0 && session.count >= session.maxCount) {
+          session.status = 'completed';
+          break;
+        }
+
+        await sleep(session.interval * 1000);
+      } catch (err) {
+        session.status = 'error';
+        UI.showToast('诵经出错：' + err.message, 'error');
+        break;
+      }
+    }
+
+    if (session && session.status !== 'stopped') {
+      finishSession(session.status);
+    }
+
+    isChanting = false;
+    isPaused = false;
+    UI.setChantingState(false, false);
+    UI.updateProgress('诵经结束', '共 ' + (session ? session.count : 0) + ' 次');
+  }
+
+  function finishSession(status) {
+    if (!session) return;
+    session.status = status;
+    session.totalDuration = Date.now() - session.startTime;
+    session.userMerit = Merit.addMerit(userMerit, 0n) - session.userMeritBefore;
+    session.modelMerit = modelMerit;
+    session.contextLength = estimateContextTokens();
+
+    const record = {
+      id: User.generateGUID(),
+      timestamp: session.startTime,
+      scriptureId: session.scriptureId,
+      scriptureName: session.scriptureName,
+      apiType: session.apiType,
+      provider: session.provider,
+      model: session.model,
+      count: session.count,
+      totalDuration: session.totalDuration,
+      userMerit: session.userMerit.toString(),
+      modelMerit: session.modelMerit.toString(),
+      status: session.status,
+      contextLength: session.contextLength,
+    };
+
+    records.push(record);
+    user.records.push(record.id);
+    saveState();
+    UI.renderRecords(records);
+    session = null;
+    modelMerit = 0n;
+  }
+
+  function updateByScripture(id, delta) {
+    if (!user.byScripture) user.byScripture = {};
+    const current = NumberUtils.toBigInt(user.byScripture[id] || '0');
+    user.byScripture[id] = (current + delta).toString();
+  }
+
+  function updateByModel(model, delta) {
+    if (!user.byModel) user.byModel = {};
+    const key = model || 'unknown';
+    const current = NumberUtils.toBigInt(user.byModel[key] || '0');
+    user.byModel[key] = (current + delta).toString();
+  }
+
+  function isContextLimitReached() {
+    return estimateContextTokens() > 8000;
+  }
+
+  function estimateContextTokens() {
+    let chars = 0;
+    session.history.forEach((ex) => {
+      chars += (ex.reply || '').length;
+    });
+    return Math.ceil(chars / 4);
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   if (document.readyState === 'loading') {
