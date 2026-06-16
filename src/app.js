@@ -51,12 +51,35 @@
   function setupUI() {
     UI.updateUserDisplay(user);
     UI.renderScriptureOptions(global.SCRIPTURES, selectedScriptureId);
-    UI.renderProviderOptions('openai', 'openai');
+    loadApiConfigToUI();
     UI.updateMeritDisplay(userMerit, modelMerit, null);
     UI.renderRecords(records);
     UI.createParticles('user-particles', 12);
     UI.createParticles('model-particles', 12);
     fetchRankings();
+  }
+
+  function loadApiConfigToUI() {
+    const saved = Storage.loadApiConfig() || {};
+    const apiType = saved.apiType || 'openai';
+    const provider = saved.provider || 'openai';
+
+    const apiTypeInput = UI.$('api-type');
+    if (apiTypeInput) apiTypeInput.value = apiType;
+    UI.renderProviderOptions(apiType, provider);
+
+    const providerInput = UI.$('api-provider');
+    if (providerInput) providerInput.value = provider;
+    if (UI.$('api-key')) UI.$('api-key').value = saved.apiKey || '';
+    if (UI.$('api-endpoint')) UI.$('api-endpoint').value = saved.endpoint || '';
+    if (UI.$('api-model')) UI.$('api-model').value = saved.model || '';
+    if (UI.$('server-url')) UI.$('server-url').value = saved.serverUrl || 'http://localhost:3000';
+  }
+
+  function saveCurrentApiConfig() {
+    const config = UI.getApiConfig();
+    config.serverUrl = UI.getServerUrl();
+    Storage.saveApiConfig(config);
   }
 
   function refreshUI() {
@@ -74,6 +97,7 @@
 
     UI.bindEvent('api-type', 'change', (e) => {
       UI.renderProviderOptions(e.target.value, 'custom');
+      saveCurrentApiConfig();
     });
 
     UI.bindEvent('api-config-toggle', 'click', () => {
@@ -104,6 +128,10 @@
     UI.bindEvent('btn-import', 'click', () => UI.$('import-file')?.click());
     UI.bindEvent('import-file', 'change', importArchive);
     UI.bindEvent('btn-sync', 'click', syncToServer);
+
+    ['api-provider', 'api-key', 'api-endpoint', 'api-model', 'server-url'].forEach((id) => {
+      UI.bindEvent(id, 'change', saveCurrentApiConfig);
+    });
 
     UI.bindEvent('btn-start', 'click', startChanting);
     UI.bindEvent('btn-pause', 'click', pauseChanting);
@@ -176,23 +204,27 @@
     }
 
     const settings = UI.getChantSettings();
+    const resolvedModel = apiConfig.model || apiClient.config().model;
     isChanting = true;
     isPaused = false;
-    modelMerit = 0n;
+    modelMerit = NumberUtils.toBigInt((user.byModel || {})[resolvedModel] || '0');
     session = {
       startTime: Date.now(),
       scriptureId: scripture.id,
       scriptureName: scripture.name,
       apiType: apiConfig.apiType,
       provider: apiConfig.provider,
-      model: apiConfig.model || apiClient.config().model,
+      model: resolvedModel,
       history: [],
       count: 0,
       maxCount: settings.count,
       interval: settings.interval,
       userMeritBefore: userMerit,
+      modelMeritBefore: modelMerit,
       status: 'stopped',
     };
+
+    saveCurrentApiConfig();
 
     UI.setChantingState(true, false);
     UI.clearLlmOutput();
@@ -285,7 +317,7 @@
     session.status = status;
     session.totalDuration = Date.now() - session.startTime;
     session.userMerit = Merit.addMerit(userMerit, 0n) - session.userMeritBefore;
-    session.modelMerit = modelMerit;
+    session.modelMerit = Merit.addMerit(modelMerit, 0n) - session.modelMeritBefore;
     session.contextLength = estimateContextTokens();
 
     const record = {
@@ -309,7 +341,6 @@
     saveState();
     UI.renderRecords(records);
     session = null;
-    modelMerit = 0n;
   }
 
   function updateByScripture(id, delta) {

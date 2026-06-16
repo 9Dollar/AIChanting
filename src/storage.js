@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = 'aichanting_user_v1';
   const RECORDS_KEY = 'aichanting_records_v1';
+  const API_CONFIG_KEY = 'aichanting_api_config_v1';
 
   function getStorage() {
     return global.localStorage;
@@ -69,10 +70,32 @@
     };
   }
 
+  function loadApiConfig() {
+    try {
+      const raw = getStorage().getItem(API_CONFIG_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      console.warn('读取 API 配置失败', e);
+      return null;
+    }
+  }
+
+  function saveApiConfig(config) {
+    try {
+      getStorage().setItem(API_CONFIG_KEY, JSON.stringify(config));
+      return true;
+    } catch (e) {
+      console.warn('保存 API 配置失败', e);
+      return false;
+    }
+  }
+
   function clearAll() {
     try {
       getStorage().removeItem(STORAGE_KEY);
       getStorage().removeItem(RECORDS_KEY);
+      getStorage().removeItem(API_CONFIG_KEY);
       return true;
     } catch (e) {
       console.warn('清除本地存档失败', e);
@@ -85,6 +108,8 @@
     saveUser,
     loadRecords,
     saveRecords,
+    loadApiConfig,
+    saveApiConfig,
     exportData,
     importData,
     clearAll,
