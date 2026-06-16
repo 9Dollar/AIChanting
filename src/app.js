@@ -56,6 +56,7 @@
     UI.renderRecords(records);
     UI.createParticles('user-particles', 12);
     UI.createParticles('model-particles', 12);
+    fetchRankings();
   }
 
   function refreshUI() {
@@ -102,6 +103,7 @@
     UI.bindEvent('btn-export', 'click', exportArchive);
     UI.bindEvent('btn-import', 'click', () => UI.$('import-file')?.click());
     UI.bindEvent('import-file', 'change', importArchive);
+    UI.bindEvent('btn-sync', 'click', syncToServer);
 
     UI.bindEvent('btn-start', 'click', startChanting);
     UI.bindEvent('btn-pause', 'click', pauseChanting);
@@ -330,6 +332,58 @@
       chars += (ex.reply || '').length;
     });
     return Math.ceil(chars / 4);
+  }
+
+  async function syncToServer() {
+    const serverUrl = UI.getServerUrl();
+    try {
+      const userRes = await fetch(serverUrl + '/api/user/merit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          userName: user.name,
+          merit: userMerit.toString(),
+          chantCount: user.chantCount,
+        }),
+      });
+      if (!userRes.ok) throw new Error('同步用户功德失败');
+
+      const lastRecord = records[records.length - 1];
+      if (lastRecord) {
+        const modelRes = await fetch(serverUrl + '/api/model/merit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: lastRecord.provider || 'unknown',
+            model: lastRecord.model || 'unknown',
+            merit: lastRecord.modelMerit || '0',
+            chantCount: lastRecord.count || 0,
+          }),
+        });
+        if (!modelRes.ok) throw new Error('同步模型功德失败');
+      }
+
+      UI.showToast('已同步到服务器');
+      await fetchRankings();
+    } catch (err) {
+      UI.showToast('同步失败：' + err.message, 'error');
+    }
+  }
+
+  async function fetchRankings() {
+    const serverUrl = UI.getServerUrl();
+    try {
+      const [userRes, modelRes] = await Promise.all([
+        fetch(serverUrl + '/api/user/ranking'),
+        fetch(serverUrl + '/api/model/ranking'),
+      ]);
+      const userData = await userRes.json();
+      const modelData = await modelRes.json();
+      UI.renderRankings(userData.data, modelData.data);
+    } catch (err) {
+      console.warn('获取排行榜失败', err);
+    }
   }
 
   function sleep(ms) {

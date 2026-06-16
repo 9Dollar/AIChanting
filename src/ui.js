@@ -141,6 +141,11 @@
     };
   }
 
+  function getServerUrl() {
+    const input = $('server-url');
+    return input ? input.value.trim() || 'http://localhost:3000' : 'http://localhost:3000';
+  }
+
   function getChantSettings() {
     return {
       count: parseInt($('chant-count')?.value || '0', 10),
@@ -287,6 +292,7 @@
     updateProgress,
     renderProviderOptions,
     getApiConfig,
+    getServerUrl,
     getChantSettings,
     getSelectedScriptureId,
     renderRecords,
