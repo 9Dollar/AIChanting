@@ -19,13 +19,189 @@
     </header>
 
     <main id="app" class="space-y-6">
-      <p class="text-center text-gray-600">正在加载应用...</p>
+      <!-- 用户信息 -->
+      <section class="card p-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold mb-1">修行者信息</h2>
+            <p class="text-sm text-gray-600">法名：<span id="user-name" class="font-semibold text-yellow-700">-</span></p>
+            <p class="text-xs text-gray-500">GUID: <span id="user-id">-</span></p>
+          </div>
+          <div class="flex items-center gap-3">
+            <input id="user-name-input" type="text" placeholder="自定义法名" class="input-field text-sm" />
+            <button id="btn-update-name" class="btn-primary text-sm">修改</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 经文选择 -->
+      <section class="card p-5">
+        <h2 class="text-xl font-bold mb-3">选择经文</h2>
+        <select id="scripture-select" class="input-field w-full mb-4">
+          <option value="">请选择一部经典</option>
+        </select>
+        <div id="scripture-preview" class="hidden bg-white/60 rounded-lg p-4 border border-yellow-200">
+          <h3 class="text-lg font-bold text-red-800 mb-1" id="scripture-name">-</h3>
+          <p class="text-xs text-gray-500 mb-2" id="scripture-description">-</p>
+          <p class="text-sm leading-relaxed text-gray-700" id="scripture-content">-</p>
+          <p class="text-sm mt-2">基础功德/次：<span id="scripture-merit" class="font-bold text-yellow-700">-</span></p>
+        </div>
+      </section>
+
+      <!-- API 配置 -->
+      <section class="card p-5">
+        <div class="flex items-center justify-between cursor-pointer" id="api-config-toggle">
+          <h2 class="text-xl font-bold">API 配置</h2>
+          <span id="api-config-arrow" class="text-yellow-700 text-xl">▼</span>
+        </div>
+        <div id="api-config-panel" class="mt-4 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-semibold mb-1">API 格式</label>
+              <select id="api-type" class="input-field w-full">
+                <option value="openai">OpenAI 格式</option>
+                <option value="anthropic">Anthropic 格式</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-semibold mb-1">服务商</label>
+              <select id="api-provider" class="input-field w-full"></select>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold mb-1">API 密钥</label>
+            <input id="api-key" type="password" class="input-field w-full" placeholder="sk-..." />
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-semibold mb-1">自定义端点（可选）</label>
+              <input id="api-endpoint" type="text" class="input-field w-full" placeholder="https://..." />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold mb-1">自定义模型（可选）</label>
+              <input id="api-model" type="text" class="input-field w-full" placeholder="默认模型" />
+            </div>
+          </div>
+          <p class="text-xs text-gray-500">密钥仅保存在浏览器本地，不会上传到服务器。</p>
+        </div>
+      </section>
+
+      <!-- 功德展示 -->
+      <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="card p-5 text-center animate-pulse-glow relative overflow-hidden">
+          <div class="absolute inset-0 pointer-events-none" id="user-particles"></div>
+          <h2 class="text-xl font-bold mb-2">用户功德</h2>
+          <p id="user-merit-display" class="text-3xl font-bold text-yellow-700 mb-1">0</p>
+          <p id="user-merit-traditional" class="text-sm text-gray-600">零</p>
+          <p id="user-merit-delta" class="text-sm text-red-700 font-semibold mt-1 hidden">+0</p>
+        </div>
+        <div class="card p-5 text-center animate-pulse-glow relative overflow-hidden">
+          <div class="absolute inset-0 pointer-events-none" id="model-particles"></div>
+          <h2 class="text-xl font-bold mb-2">模型功德</h2>
+          <p id="model-merit-display" class="text-3xl font-bold text-yellow-700 mb-1">0</p>
+          <p id="model-merit-traditional" class="text-sm text-gray-600">零</p>
+          <p id="model-merit-delta" class="text-sm text-red-700 font-semibold mt-1 hidden">+0</p>
+        </div>
+      </section>
+
+      <!-- 控制与设置 -->
+      <section class="card p-5">
+        <div class="flex flex-wrap items-center gap-4 mb-4">
+          <button id="btn-start" class="btn-primary">开始诵经</button>
+          <button id="btn-pause" class="btn-primary" disabled>暂停</button>
+          <button id="btn-stop" class="btn-primary" disabled>停止</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-semibold mb-1">目标次数（0为无限）</label>
+            <input id="chant-count" type="number" min="0" value="10" class="input-field w-full" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold mb-1">间隔（秒）</label>
+            <input id="chant-interval" type="number" min="1" max="60" value="5" class="input-field w-full" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold mb-1">虔诚称号</label>
+            <p id="devotion-title" class="input-field w-full bg-yellow-50 text-yellow-800 font-semibold">初入门</p>
+          </div>
+        </div>
+        <div class="mt-4">
+          <button id="btn-devotion-table" class="text-sm text-yellow-700 underline hover:text-red-800">查看虔诚系数表</button>
+        </div>
+      </section>
+
+      <!-- 进度 -->
+      <section class="card p-5 text-center relative overflow-hidden">
+        <div id="chanting-visual" class="py-6">
+          <svg class="w-20 h-20 mx-auto text-yellow-600 animate-spin-slow" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="50" cy="50" r="45" stroke-dasharray="8 4" />
+            <circle cx="50" cy="50" r="30" />
+            <path d="M50 5 L50 20 M50 80 L50 95 M5 50 L20 50 M80 50 L95 50" />
+          </svg>
+          <p id="progress-text" class="mt-4 text-lg font-semibold">准备就绪</p>
+          <p id="progress-detail" class="text-sm text-gray-600">-</p>
+        </div>
+      </section>
+
+      <!-- 排行榜 -->
+      <section class="card p-5">
+        <h2 class="text-xl font-bold mb-3">排行榜</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h3 class="font-semibold text-yellow-700 mb-2">用户功德榜</h3>
+            <ol id="user-ranking" class="text-sm space-y-1 list-decimal list-inside">
+              <li class="text-gray-500">暂无数据</li>
+            </ol>
+          </div>
+          <div>
+            <h3 class="font-semibold text-yellow-700 mb-2">模型功德榜</h3>
+            <ol id="model-ranking" class="text-sm space-y-1 list-decimal list-inside">
+              <li class="text-gray-500">暂无数据</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- 诵经记录 -->
+      <section class="card p-5">
+        <h2 class="text-xl font-bold mb-3">诵经记录</h2>
+        <div id="records-list" class="space-y-2 max-h-64 overflow-y-auto pr-1 mb-4">
+          <p class="text-sm text-gray-500">暂无记录</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button id="btn-export" class="btn-primary text-sm">导出存档</button>
+          <button id="btn-import" class="btn-primary text-sm">导入存档</button>
+          <input id="import-file" type="file" accept="application/json" class="hidden" />
+          <button id="btn-sync" class="btn-primary text-sm">同步服务器</button>
+        </div>
+      </section>
     </main>
 
     <footer class="text-center mt-12 text-sm text-gray-500">
       <p>赛博功德转换器 · 仅供娱乐</p>
     </footer>
   </div>
+
+  <!-- 虔诚系数表弹窗 -->
+  <div id="devotion-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
+    <div class="card max-w-md w-full p-6 relative">
+      <button id="btn-close-modal" class="absolute top-3 right-3 text-gray-500 hover:text-red-800 text-xl">&times;</button>
+      <h2 class="text-2xl font-bold mb-4">虔诚系数表</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-yellow-300">
+            <th class="text-left py-2">连续诵经次数</th>
+            <th class="text-left py-2">系数</th>
+            <th class="text-left py-2">称号</th>
+          </tr>
+        </thead>
+        <tbody id="devotion-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 提示条 -->
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-red-800 text-white px-4 py-2 rounded-full shadow-lg text-sm hidden z-50"></div>
 
   <script src="data/scriptures.js"></script>
   <script src="data/names.js"></script>
@@ -34,6 +210,7 @@
   <script src="src/storage.js"></script>
   <script src="src/merit.js"></script>
   <script src="src/api.js"></script>
+  <script src="src/ui.js"></script>
   <script src="src/app.js"></script>
 </body>
 </html>
