@@ -195,6 +195,7 @@
     };
 
     UI.setChantingState(true, false);
+    UI.clearLlmOutput();
     UI.updateProgress('开始诵经', '第 0 次');
     chantingLoop(scripture);
   }
@@ -232,6 +233,8 @@
         const result = await apiClient.chat(session.history, scripture.content);
         const exchange = { reply: result.reply };
         session.history.push(exchange);
+
+        UI.showLlmOutput(result.reply, session.count + 1);
 
         const calc = Merit.calculateSingleMerit(scripture.baseMerit, currentCount);
         const delta = calc.merit;

@@ -296,6 +296,7 @@
   function showLlmOutput(text, count) {
     const output = $('llm-output');
     if (!output) return;
+    showElement('llm-output-panel');
     setText('llm-output-counter', '第 ' + (count || 0) + ' 次');
 
     if (currentTypewriter) {
