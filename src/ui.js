@@ -272,6 +272,72 @@
     if (visual) {
       visual.classList.toggle('opacity-50', isPaused);
     }
+
+    const panel = $('llm-output-panel');
+    if (panel) {
+      if (isChanting) {
+        showElement('llm-output-panel');
+      }
+    }
+  }
+
+  let currentTypewriter = null;
+
+  function clearLlmOutput() {
+    const output = $('llm-output');
+    if (output) output.textContent = '';
+    setText('llm-output-counter', '第 0 次');
+    if (currentTypewriter) {
+      currentTypewriter.stop();
+      currentTypewriter = null;
+    }
+  }
+
+  function showLlmOutput(text, count) {
+    const output = $('llm-output');
+    if (!output) return;
+    setText('llm-output-counter', '第 ' + (count || 0) + ' 次');
+
+    if (currentTypewriter) {
+      currentTypewriter.stop();
+    }
+
+    output.textContent = '';
+    currentTypewriter = typewriter(text, output, 8);
+  }
+
+  function typewriter(text, container, charDelayMs) {
+    let index = 0;
+    let stopped = false;
+    const delay = Math.max(4, charDelayMs || 8);
+
+    function tick() {
+      if (stopped) return;
+      if (index >= text.length) return;
+
+      const chunkSize = Math.max(1, Math.min(3, Math.ceil(text.length / 120)));
+      const end = Math.min(index + chunkSize, text.length);
+      container.textContent += text.slice(index, end);
+      index = end;
+      container.scrollTop = container.scrollHeight;
+
+      if (index < text.length) {
+        setTimeout(tick, delay);
+      }
+    }
+
+    tick();
+
+    return {
+      stop: function () {
+        stopped = true;
+      },
+      finish: function () {
+        stopped = true;
+        container.textContent = text;
+        container.scrollTop = container.scrollHeight;
+      },
+    };
   }
 
   global.UiModule = {
@@ -303,5 +369,8 @@
     closeDevotionModal,
     createParticles,
     setChantingState,
+    clearLlmOutput,
+    showLlmOutput,
+    typewriter,
   };
 })(window);

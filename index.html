@@ -134,16 +134,23 @@
         </div>
       </section>
 
-      <!-- 进度 -->
-      <section class="card p-5 text-center relative overflow-hidden">
-        <div id="chanting-visual" class="py-6">
-          <svg class="w-20 h-20 mx-auto text-yellow-600 animate-spin-slow" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
+      <!-- 进度与 AI 输出 -->
+      <section class="card p-5 relative overflow-hidden">
+        <div id="chanting-visual" class="py-4 text-center">
+          <svg class="w-16 h-16 mx-auto text-yellow-600 animate-spin-slow" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="50" cy="50" r="45" stroke-dasharray="8 4" />
             <circle cx="50" cy="50" r="30" />
             <path d="M50 5 L50 20 M50 80 L50 95 M5 50 L20 50 M80 50 L95 50" />
           </svg>
-          <p id="progress-text" class="mt-4 text-lg font-semibold">准备就绪</p>
+          <p id="progress-text" class="mt-3 text-lg font-semibold">准备就绪</p>
           <p id="progress-detail" class="text-sm text-gray-600">-</p>
+        </div>
+        <div id="llm-output-panel" class="mt-4 hidden">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-bold text-red-800">AI 诵经输出</h3>
+            <span id="llm-output-counter" class="text-xs text-yellow-700 font-semibold">第 0 次</span>
+          </div>
+          <div id="llm-output" class="bg-white/70 border border-yellow-200 rounded-lg p-4 h-48 overflow-y-auto text-sm leading-relaxed text-gray-800 whitespace-pre-wrap font-serif"></div>
         </div>
       </section>
 
