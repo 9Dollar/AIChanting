@@ -25,6 +25,7 @@
     setupUI();
     setupEvents();
     refreshUI();
+    retryPendingModelIncrements();
   }
 
   function loadUser() {
@@ -127,7 +128,7 @@
     UI.bindEvent('btn-export', 'click', exportArchive);
     UI.bindEvent('btn-import', 'click', () => UI.$('import-file')?.click());
     UI.bindEvent('import-file', 'change', importArchive);
-    UI.bindEvent('btn-sync', 'click', syncToServer);
+    UI.bindEvent('btn-sync', 'click', uploadUserData);
 
     ['api-provider', 'api-key', 'api-endpoint', 'api-model', 'server-url'].forEach((id) => {
       UI.bindEvent(id, 'change', saveCurrentApiConfig);
@@ -207,7 +208,7 @@
     const resolvedModel = apiConfig.model || apiClient.config().model;
     isChanting = true;
     isPaused = false;
-    modelMerit = NumberUtils.toBigInt((user.byModel || {})[resolvedModel] || '0');
+    modelMerit = NumberUtils.toBigInt((user.byModel || {})[resolvedModel] ? user.byModel[resolvedModel].merit : '0');
     session = {
       startTime: Date.now(),
       scriptureId: scripture.id,
@@ -277,11 +278,14 @@
         user.chantCount += 1;
 
         updateByScripture(scripture.id, delta);
-        updateByModel(session.model, delta);
+        updateByModel(session.model, delta, session.provider);
 
         UI.updateMeritDisplay(userMerit, modelMerit, delta);
         UI.updateDevotionTitle(calc.title);
         UI.updateProgress('诵经完成一次', '第 ' + session.count + ' 次 · 系数 ' + calc.coefficient);
+
+        // 每次诵经完成，增量上传模型功德（失败入队重试）
+        uploadModelMeritIncrement(session.provider, session.model, delta, 1);
 
         if (isContextLimitReached()) {
           session.status = 'context_limit';
@@ -349,11 +353,17 @@
     user.byScripture[id] = (current + delta).toString();
   }
 
-  function updateByModel(model, delta) {
+  function updateByModel(model, delta, provider) {
     if (!user.byModel) user.byModel = {};
     const key = model || 'unknown';
-    const current = NumberUtils.toBigInt(user.byModel[key] || '0');
-    user.byModel[key] = (current + delta).toString();
+    const existing = user.byModel[key] || { provider: provider || 'unknown', model: key, merit: '0', chantCount: 0 };
+    const current = NumberUtils.toBigInt(existing.merit || '0');
+    user.byModel[key] = {
+      provider: provider || existing.provider || 'unknown',
+      model: key,
+      merit: (current + delta).toString(),
+      chantCount: (existing.chantCount || 0) + 1,
+    };
   }
 
   function isContextLimitReached() {
@@ -368,7 +378,82 @@
     return Math.ceil(chars / 4);
   }
 
-  async function syncToServer() {
+  // 模型功德增量上传：每次诵经完成调用，失败入队重试
+  async function uploadModelMeritIncrement(provider, model, meritDelta, chantDelta) {
+    const serverUrl = UI.getServerUrl();
+    try {
+      const res = await fetch(serverUrl + '/api/model/merit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider || 'unknown',
+          model: model || 'unknown',
+          merit: meritDelta.toString(),
+          chantCount: chantDelta || 0,
+        }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+    } catch (err) {
+      // 失败：入队，下次重试
+      const pending = Storage.loadPendingModelIncrements() || [];
+      pending.push({
+        provider: provider || 'unknown',
+        model: model || 'unknown',
+        merit: meritDelta.toString(),
+        chantCount: chantDelta || 0,
+      });
+      Storage.savePendingModelIncrements(pending);
+      console.warn('模型功德增量上传失败，已入队', err);
+    }
+  }
+
+  // 页面加载时重试未同步的模型增量（合并同一 provider+model 的条目）
+  async function retryPendingModelIncrements() {
+    const pending = Storage.loadPendingModelIncrements() || [];
+    if (pending.length === 0) return;
+
+    // 按 provider+model 合并
+    const merged = {};
+    pending.forEach((item) => {
+      const key = item.provider + '|' + item.model;
+      if (!merged[key]) {
+        merged[key] = { provider: item.provider, model: item.model, merit: 0n, chantCount: 0 };
+      }
+      merged[key].merit += NumberUtils.toBigInt(item.merit || '0');
+      merged[key].chantCount += Number(item.chantCount || 0);
+    });
+
+    const serverUrl = UI.getServerUrl();
+    const failedKeys = new Set();
+
+    await Promise.all(
+      Object.entries(merged).map(async ([key, item]) => {
+        try {
+          const res = await fetch(serverUrl + '/api/model/merit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: item.provider,
+              model: item.model,
+              merit: item.merit.toString(),
+              chantCount: item.chantCount,
+            }),
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+        } catch (err) {
+          failedKeys.add(key);
+          console.warn('重试模型增量失败: ' + key, err);
+        }
+      })
+    );
+
+    // 只保留失败条目
+    const remaining = pending.filter((item) => failedKeys.has(item.provider + '|' + item.model));
+    Storage.savePendingModelIncrements(remaining);
+  }
+
+  // 用户功德全量上传（用户主动点击按钮）
+  async function uploadUserData() {
     const serverUrl = UI.getServerUrl();
     try {
       const userRes = await fetch(serverUrl + '/api/user/merit', {
@@ -381,27 +466,11 @@
           chantCount: user.chantCount,
         }),
       });
-      if (!userRes.ok) throw new Error('同步用户功德失败');
-
-      const lastRecord = records[records.length - 1];
-      if (lastRecord) {
-        const modelRes = await fetch(serverUrl + '/api/model/merit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider: lastRecord.provider || 'unknown',
-            model: lastRecord.model || 'unknown',
-            merit: lastRecord.modelMerit || '0',
-            chantCount: lastRecord.count || 0,
-          }),
-        });
-        if (!modelRes.ok) throw new Error('同步模型功德失败');
-      }
-
-      UI.showToast('已同步到服务器');
+      if (!userRes.ok) throw new Error('上传用户数据失败');
+      UI.showToast('用户数据已上传');
       await fetchRankings();
     } catch (err) {
-      UI.showToast('同步失败：' + err.message, 'error');
+      UI.showToast('上传失败：' + err.message, 'error');
     }
   }
 

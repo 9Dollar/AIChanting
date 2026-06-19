@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check db.js && node --check routes/merit.js && node --check routes/ranking.js && node --check middleware/rateLimit.js"
+    "reset": "node reset-db.js",
+    "test": "node --check server.js && node --check db.js && node --check routes/merit.js && node --check routes/ranking.js && node --check middleware/rateLimit.js && node --check reset-db.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
