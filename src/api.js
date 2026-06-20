@@ -1,6 +1,22 @@
 (function (global) {
   'use strict';
 
+  /**
+   * 模型配置预设
+   * @typedef {Object} ApiPreset
+   * @property {string} id 预设唯一 id
+   * @property {string} name 显示名称（为空时默认使用 model）
+   * @property {'openai'|'anthropic'} apiType API 格式
+   * @property {string} provider 服务商 key
+   * @property {string} apiKey API 密钥
+   * @property {string} endpoint 自定义端点（可空，使用 provider 默认）
+   * @property {string} model 模型名称
+   * @property {boolean} pinned 是否置顶
+   * @property {number} order 同组内排序
+   * @property {number} createdAt 创建时间戳
+   * @property {number} updatedAt 更新时间戳
+   */
+
   const OPENAI_PROVIDERS = {
     openai: {
       name: 'OpenAI',
@@ -159,12 +175,17 @@
     };
   }
 
-  function createApiClient(options) {
-    const apiType = options.apiType || 'openai';
-    const providerKey = options.provider || 'openai';
-    const apiKey = options.apiKey || '';
-    const customEndpoint = options.endpoint || '';
-    const customModel = options.model || '';
+  /**
+   * 创建 API 客户端
+   * @param {ApiPreset} preset 模型配置预设
+   * @returns {{config: Function, chat: Function, abort: Function}}
+   */
+  function createApiClient(preset) {
+    const apiType = preset.apiType || 'openai';
+    const providerKey = preset.provider || 'openai';
+    const apiKey = preset.apiKey || '';
+    const customEndpoint = preset.endpoint || '';
+    const customModel = preset.model || '';
 
     const config = getProviderConfig(apiType, providerKey, customEndpoint, customModel);
 

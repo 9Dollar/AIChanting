@@ -18,6 +18,7 @@
   let isPaused = false;
   let apiClient = null;
   let session = null;
+  let editingPresetId = null;
 
   function init() {
     loadUser();
@@ -52,7 +53,8 @@
   function setupUI() {
     UI.updateUserDisplay(user);
     UI.renderScriptureOptions(global.SCRIPTURES, selectedScriptureId);
-    loadApiConfigToUI();
+    loadServerUrlToUI();
+    refreshPresetList();
     UI.updateMeritDisplay(userMerit, modelMerit, null);
     UI.renderRecords(records);
     UI.createParticles('user-particles', 12);
@@ -60,27 +62,196 @@
     fetchRankings();
   }
 
-  function loadApiConfigToUI() {
-    const saved = Storage.loadApiConfig() || {};
-    const apiType = saved.apiType || 'openai';
-    const provider = saved.provider || 'openai';
-
-    const apiTypeInput = UI.$('api-type');
-    if (apiTypeInput) apiTypeInput.value = apiType;
-    UI.renderProviderOptions(apiType, provider);
-
-    const providerInput = UI.$('api-provider');
-    if (providerInput) providerInput.value = provider;
-    if (UI.$('api-key')) UI.$('api-key').value = saved.apiKey || '';
-    if (UI.$('api-endpoint')) UI.$('api-endpoint').value = saved.endpoint || '';
-    if (UI.$('api-model')) UI.$('api-model').value = saved.model || '';
-    if (UI.$('server-url')) UI.$('server-url').value = saved.serverUrl || 'http://localhost:3000';
+  function loadServerUrlToUI() {
+    const url = Storage.loadServerUrl();
+    if (UI.$('server-url')) UI.$('server-url').value = url;
   }
 
-  function saveCurrentApiConfig() {
-    const config = UI.getApiConfig();
-    config.serverUrl = UI.getServerUrl();
-    Storage.saveApiConfig(config);
+  function saveServerUrlFromUI() {
+    Storage.saveServerUrl(UI.getServerUrl());
+  }
+
+  function refreshPresetList() {
+    const presets = Storage.loadPresets();
+    UI.renderPresetList(presets, user ? user.activePresetId : null, isChanting);
+  }
+
+  function getActivePreset() {
+    if (!user || !user.activePresetId) return null;
+    return Storage.getPreset(user.activePresetId);
+  }
+
+  function setActivePreset(id) {
+    user.activePresetId = id;
+    Storage.saveUser(user);
+    refreshPresetList();
+  }
+
+  function getNextOrder(pinned) {
+    const presets = Storage.loadPresets();
+    const sameGroup = presets.filter(function (p) { return p.pinned === pinned; });
+    if (sameGroup.length === 0) return 0;
+    return Math.max.apply(null, sameGroup.map(function (p) { return p.order || 0; })) + 1;
+  }
+
+  function handleAddPreset() {
+    editingPresetId = null;
+    UI.openPresetModal('add');
+  }
+
+  function handleEditPreset(id) {
+    editingPresetId = id;
+    const preset = Storage.getPreset(id);
+    if (preset) UI.openPresetModal('edit', preset);
+  }
+
+  function handleSavePreset() {
+    const data = UI.getPresetFormData();
+    if (!data.apiKey) {
+      UI.showToast('请填写 API 密钥', 'error');
+      return;
+    }
+    if (!data.model) {
+      UI.showToast('请填写模型名称', 'error');
+      return;
+    }
+    if (!data.name) data.name = data.model;
+
+    if (editingPresetId) {
+      const existing = Storage.getPreset(editingPresetId);
+      if (!existing) {
+        UI.showToast('预设不存在', 'error');
+        return;
+      }
+      const updated = Object.assign({}, existing, {
+        name: data.name,
+        apiType: data.apiType,
+        provider: data.provider,
+        apiKey: data.apiKey,
+        endpoint: data.endpoint,
+        model: data.model,
+        updatedAt: Date.now(),
+      });
+      Storage.updatePreset(updated);
+      UI.showToast('模型配置已更新');
+    } else {
+      const preset = {
+        id: User.generateGUID(),
+        name: data.name,
+        apiType: data.apiType,
+        provider: data.provider,
+        apiKey: data.apiKey,
+        endpoint: data.endpoint,
+        model: data.model,
+        pinned: false,
+        order: getNextOrder(false),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      Storage.addPreset(preset);
+      UI.showToast('模型配置已新增');
+    }
+
+    editingPresetId = null;
+    UI.closePresetModal();
+    refreshPresetList();
+  }
+
+  function handleDeletePreset(id) {
+    Storage.deletePreset(id);
+    if (user.activePresetId === id) {
+      user.activePresetId = null;
+      Storage.saveUser(user);
+      UI.showToast('已删除当前选中的配置，请重新选择');
+    } else {
+      UI.showToast('模型配置已删除');
+    }
+    refreshPresetList();
+  }
+
+  function handleTogglePin(id) {
+    const preset = Storage.getPreset(id);
+    if (!preset) return;
+    const newPinned = !preset.pinned;
+    const newOrder = getNextOrder(newPinned);
+    Storage.updatePreset(Object.assign({}, preset, {
+      pinned: newPinned,
+      order: newOrder,
+      updatedAt: Date.now(),
+    }));
+    refreshPresetList();
+  }
+
+  function movePreset(id, direction) {
+    const presets = Storage.loadPresets();
+    const preset = presets.find(function (p) { return p.id === id; });
+    if (!preset) return;
+
+    const sameGroup = presets
+      .filter(function (p) { return p.pinned === preset.pinned; })
+      .sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+
+    const idx = sameGroup.findIndex(function (p) { return p.id === id; });
+    if (idx === -1) return;
+
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= sameGroup.length) return;
+
+    const target = sameGroup[targetIdx];
+    const tmpOrder = preset.order;
+    Storage.updatePreset(Object.assign({}, preset, { order: target.order, updatedAt: Date.now() }));
+    Storage.updatePreset(Object.assign({}, target, { order: tmpOrder, updatedAt: Date.now() }));
+
+    refreshPresetList();
+  }
+
+  function handleMoveUp(id) {
+    movePreset(id, -1);
+  }
+
+  function handleMoveDown(id) {
+    movePreset(id, 1);
+  }
+
+  function handleSelectPreset(id) {
+    setActivePreset(id);
+  }
+
+  function setupPresetListEvents() {
+    const container = UI.$('preset-list');
+    if (!container) return;
+
+    container.addEventListener('click', function (e) {
+      const target = e.target;
+      const action = target.getAttribute('data-action');
+      const id = target.getAttribute('data-id');
+      if (!action || !id) return;
+      if (action === 'select') return; // radio 由 change 事件处理
+
+      switch (action) {
+        case 'edit':
+          handleEditPreset(id);
+          break;
+        case 'delete':
+          handleDeletePreset(id);
+          break;
+        case 'pin':
+          handleTogglePin(id);
+          break;
+        case 'up':
+          handleMoveUp(id);
+          break;
+        case 'down':
+          handleMoveDown(id);
+          break;
+      }
+    });
+
+    container.addEventListener('change', function (e) {
+      if (e.target.type === 'radio' && e.target.name === 'preset-radio') {
+        handleSelectPreset(e.target.value);
+      }
+    });
   }
 
   function refreshUI() {
@@ -98,7 +269,6 @@
 
     UI.bindEvent('api-type', 'change', (e) => {
       UI.renderProviderOptions(e.target.value, 'custom');
-      saveCurrentApiConfig();
     });
 
     UI.bindEvent('api-config-toggle', 'click', () => {
@@ -130,27 +300,71 @@
     UI.bindEvent('import-file', 'change', importArchive);
     UI.bindEvent('btn-sync', 'click', uploadUserData);
 
-    ['api-provider', 'api-key', 'api-endpoint', 'api-model', 'server-url'].forEach((id) => {
-      UI.bindEvent(id, 'change', saveCurrentApiConfig);
+    // server-url 变更即保存
+    UI.bindEvent('server-url', 'change', saveServerUrlFromUI);
+
+    // 预设列表事件委托
+    setupPresetListEvents();
+
+    // 预设 modal 事件
+    UI.bindEvent('btn-add-preset', 'click', handleAddPreset);
+    UI.bindEvent('btn-save-preset', 'click', handleSavePreset);
+    UI.bindEvent('btn-cancel-preset', 'click', () => {
+      editingPresetId = null;
+      UI.closePresetModal();
+    });
+    UI.bindEvent('btn-close-preset-modal', 'click', () => {
+      editingPresetId = null;
+      UI.closePresetModal();
+    });
+    UI.bindEvent('preset-modal', 'click', (e) => {
+      if (e.target.id === 'preset-modal') {
+        editingPresetId = null;
+        UI.closePresetModal();
+      }
     });
 
     UI.bindEvent('btn-start', 'click', startChanting);
     UI.bindEvent('btn-pause', 'click', pauseChanting);
     UI.bindEvent('btn-stop', 'click', stopChanting);
+
+    UI.bindEvent('btn-ok-confirm', 'click', () => {
+      const cb = UI.getConfirmCallback();
+      UI.closeConfirmModal();
+      if (cb) cb();
+    });
+    UI.bindEvent('btn-cancel-confirm', 'click', () => UI.closeConfirmModal());
+    UI.bindEvent('btn-close-confirm-modal', 'click', () => UI.closeConfirmModal());
+    UI.bindEvent('confirm-modal', 'click', (e) => {
+      if (e.target.id === 'confirm-modal') UI.closeConfirmModal();
+    });
   }
 
   function exportArchive() {
-    const data = Storage.exportData(user, records);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'aichanting-archive-' + user.id + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    UI.showToast('存档已导出');
+    const presets = Storage.loadPresets();
+    const hasSensitive = presets.some((p) => p.apiKey);
+    const doExport = () => {
+      const data = Storage.exportData(user, records, presets);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'aichanting-archive-' + user.id + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      UI.showToast('存档已导出');
+    };
+    if (hasSensitive) {
+      UI.openConfirmModal(
+        '导出存档',
+        '导出的存档包含 API 密钥等敏感信息。\n请勿将此存档分享给他人，否则可能导致密钥泄露。\n\n是否继续导出？',
+        doExport
+      );
+    } else {
+      doExport();
+    }
   }
 
   function importArchive(e) {
@@ -163,6 +377,9 @@
         const imported = Storage.importData(data);
         user = User.migrateUser(imported.user);
         records = imported.records || [];
+        if (imported.presets && imported.presets.length > 0) {
+          Storage.savePresets(imported.presets);
+        }
         userMerit = NumberUtils.toBigInt(user.totalMerit);
         saveState();
         setupUI();
@@ -191,21 +408,21 @@
       return;
     }
 
-    const apiConfig = UI.getApiConfig();
-    if (!apiConfig.apiKey) {
-      UI.showToast('请输入 API 密钥', 'error');
+    const preset = getActivePreset();
+    if (!preset) {
+      UI.showToast('请先选择模型配置', 'error');
       return;
     }
 
     try {
-      apiClient = Api.createApiClient(apiConfig);
+      apiClient = Api.createApiClient(preset);
     } catch (err) {
       UI.showToast('API 配置错误：' + err.message, 'error');
       return;
     }
 
     const settings = UI.getChantSettings();
-    const resolvedModel = apiConfig.model || apiClient.config().model;
+    const resolvedModel = preset.model || apiClient.config().model;
     isChanting = true;
     isPaused = false;
     modelMerit = NumberUtils.toBigInt((user.byModel || {})[resolvedModel] ? user.byModel[resolvedModel].merit : '0');
@@ -213,8 +430,8 @@
       startTime: Date.now(),
       scriptureId: scripture.id,
       scriptureName: scripture.name,
-      apiType: apiConfig.apiType,
-      provider: apiConfig.provider,
+      apiType: preset.apiType,
+      provider: preset.provider,
       model: resolvedModel,
       history: [],
       count: 0,
@@ -225,7 +442,7 @@
       status: 'stopped',
     };
 
-    saveCurrentApiConfig();
+    refreshPresetList();
 
     UI.setChantingState(true, false);
     UI.clearLlmOutput();
@@ -251,6 +468,7 @@
     finishSession('stopped');
     UI.setChantingState(false, false);
     UI.updateProgress('已停止', '-');
+    refreshPresetList();
   }
 
   async function chantingLoop(scripture) {
@@ -314,6 +532,7 @@
     isPaused = false;
     UI.setChantingState(false, false);
     UI.updateProgress('诵经结束', '共 ' + (session ? session.count : 0) + ' 次');
+    refreshPresetList();
   }
 
   function finishSession(status) {

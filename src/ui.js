@@ -129,15 +129,101 @@
     });
   }
 
-  function getApiConfig() {
-    const apiType = $('api-type') ? $('api-type').value : 'openai';
-    const provider = $('api-provider') ? $('api-provider').value : 'openai';
+  function getProviderDisplayName(apiType, providerKey) {
+    const providers = global.ApiModule ? global.ApiModule.getProviders(apiType) : {};
+    const p = providers[providerKey];
+    return p ? p.name : providerKey;
+  }
+
+  function renderPresetList(presets, activePresetId, isChanting) {
+    const container = $('preset-list');
+    if (!container) return;
+
+    if (!presets || presets.length === 0) {
+      container.innerHTML = '<p class="text-sm text-gray-500">暂无模型配置，请新增</p>';
+      return;
+    }
+
+    const sorted = presets.slice().sort(function (a, b) {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return (a.order || 0) - (b.order || 0);
+    });
+
+    container.innerHTML = sorted
+      .map(function (p) {
+        const isActive = p.id === activePresetId;
+        const disabled = isActive && isChanting;
+        const displayName =
+          p.name && p.name !== p.model ? p.name + ' · ' + p.model : p.name || p.model || '(未命名)';
+        const providerName = getProviderDisplayName(p.apiType, p.provider);
+        const radioChecked = isActive ? 'checked' : '';
+        const radioDisabled = isChanting ? 'disabled' : '';
+        const btnDisabled = disabled ? 'disabled' : '';
+        const pinLabel = p.pinned ? '取消置顶' : '置顶';
+        const btnClass = 'text-xs text-yellow-700 underline hover:text-red-800';
+        const delBtnClass = 'text-xs text-red-700 underline hover:text-red-800';
+
+        return (
+          '<div class="bg-white/60 rounded p-2 text-sm border border-yellow-100 flex items-center gap-2 flex-wrap">' +
+          '<input type="radio" name="preset-radio" value="' + escapeHtml(p.id) + '" ' + radioChecked + ' ' + radioDisabled + ' data-action="select" data-id="' + escapeHtml(p.id) + '" />' +
+          '<div class="flex-1 min-w-0">' +
+          '<p class="font-semibold">' + escapeHtml(displayName) + '</p>' +
+          '<p class="text-gray-600 text-xs">' + escapeHtml(providerName) + '</p>' +
+          '</div>' +
+          '<button class="' + btnClass + '" data-action="pin" data-id="' + escapeHtml(p.id) + '" ' + btnDisabled + '>' + pinLabel + '</button>' +
+          '<button class="' + btnClass + '" data-action="up" data-id="' + escapeHtml(p.id) + '" ' + btnDisabled + '>上移</button>' +
+          '<button class="' + btnClass + '" data-action="down" data-id="' + escapeHtml(p.id) + '" ' + btnDisabled + '>下移</button>' +
+          '<button class="' + btnClass + '" data-action="edit" data-id="' + escapeHtml(p.id) + '" ' + btnDisabled + '>编辑</button>' +
+          '<button class="' + delBtnClass + '" data-action="delete" data-id="' + escapeHtml(p.id) + '" ' + btnDisabled + '>删除</button>' +
+          '</div>'
+        );
+      })
+      .join('');
+  }
+
+  function openPresetModal(mode, preset) {
+    const modal = $('preset-modal');
+    const title = $('preset-modal-title');
+    if (!modal || !title) return;
+
+    if (mode === 'edit' && preset) {
+      title.textContent = '编辑模型配置';
+      if ($('preset-name')) $('preset-name').value = preset.name || '';
+      if ($('api-type')) $('api-type').value = preset.apiType || 'openai';
+      renderProviderOptions(preset.apiType || 'openai', preset.provider || 'openai');
+      if ($('api-key')) $('api-key').value = preset.apiKey || '';
+      if ($('api-endpoint')) $('api-endpoint').value = preset.endpoint || '';
+      if ($('api-model')) $('api-model').value = preset.model || '';
+    } else {
+      title.textContent = '新增模型配置';
+      if ($('preset-name')) $('preset-name').value = '';
+      if ($('api-type')) $('api-type').value = 'openai';
+      renderProviderOptions('openai', 'openai');
+      if ($('api-key')) $('api-key').value = '';
+      if ($('api-endpoint')) $('api-endpoint').value = '';
+      if ($('api-model')) $('api-model').value = '';
+    }
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+
+  function closePresetModal() {
+    const modal = $('preset-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+  }
+
+  function getPresetFormData() {
     return {
-      apiType: apiType,
-      provider: provider,
+      name: $('preset-name') ? $('preset-name').value.trim() : '',
+      apiType: $('api-type') ? $('api-type').value : 'openai',
+      provider: $('api-provider') ? $('api-provider').value : 'openai',
       apiKey: $('api-key') ? $('api-key').value : '',
       endpoint: $('api-endpoint') ? $('api-endpoint').value : '',
-      model: $('api-model') ? $('api-model').value : '',
+      model: $('api-model') ? $('api-model').value.trim() : '',
     };
   }
 
@@ -246,6 +332,31 @@
       modal.classList.add('hidden');
       modal.classList.remove('flex');
     }
+  }
+
+  let confirmCallback = null;
+
+  function openConfirmModal(title, message, onConfirm) {
+    const modal = $('confirm-modal');
+    if (!modal) return;
+    if ($('confirm-modal-title')) $('confirm-modal-title').textContent = title || '提示';
+    if ($('confirm-modal-message')) $('confirm-modal-message').textContent = message || '';
+    confirmCallback = typeof onConfirm === 'function' ? onConfirm : null;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+
+  function closeConfirmModal() {
+    const modal = $('confirm-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+    confirmCallback = null;
+  }
+
+  function getConfirmCallback() {
+    return confirmCallback;
   }
 
   function createParticles(containerId, count) {
@@ -358,7 +469,10 @@
     updateDevotionTitle,
     updateProgress,
     renderProviderOptions,
-    getApiConfig,
+    renderPresetList,
+    openPresetModal,
+    closePresetModal,
+    getPresetFormData,
     getServerUrl,
     getChantSettings,
     getSelectedScriptureId,
@@ -368,6 +482,9 @@
     renderDevotionTable,
     openDevotionModal,
     closeDevotionModal,
+    openConfirmModal,
+    closeConfirmModal,
+    getConfirmCallback,
     createParticles,
     setChantingState,
     clearLlmOutput,

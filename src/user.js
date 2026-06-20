@@ -28,6 +28,7 @@
       chantCount: 0,
       byScripture: {},
       byModel: {},
+      activePresetId: null,
       records: [],
     };
   }
@@ -52,6 +53,7 @@
       chantCount: Number(data.chantCount || 0),
       byScripture: data.byScripture || {},
       byModel: data.byModel || {},
+      activePresetId: data.activePresetId || null,
       records: Array.isArray(data.records) ? data.records : [],
     };
   }
